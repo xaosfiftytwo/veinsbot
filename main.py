@@ -17,6 +17,9 @@ from icsbot.misc.tells import parse
 
 import games as games_module
 
+from itertools import groupby
+from operator import itemgetter
+
 sys.stderr = file('output.txt', 'a')
 
 database = 'monkey.db'
@@ -43,10 +46,26 @@ while True:
     games = bot['games']
     
     dcursor = games.sql.dcursor # just a hack to get a cursor to the database.
+
+    # get game scores from the database
+    dcursor.execute('SELECT win, draw, loss FROM game_scores ORDER BY rowid DESC')
+    aux_scores = dcursor.fetchall()
+
+    scores = {'1-0': (aux_scores[0]['win'],aux_scores[0]['loss']), 
+              '0-1': (aux_scores[0]['loss'],aux_scores[0]['win']), 
+              '1/2-1/2': (aux_scores[0]['draw'],aux_scores[0]['draw'])
+              }
+
+    # get league scores from the database
+    dcursor.execute('SELECT rank, score FROM league_scores ORDER BY rank ASC')
+    aux_scores = dcursor.fetchall()
+    league_scores = []
+    for aux_score in aux_scores:
+        league_scores.append(aux_score['score'])
+                             
     
     ###################################
     
-    scores = {'1-0': (1,0), '0-1': (0,1), '1/2-1/2': (0.5,0.5)}
     def result_changed(game, item, old, new):
         if old in scores.keys():
             dcursor.execute('UPDATE players SET score=score-? WHERE player_id=? and tourney_id=?', (scores[old][0], game['white_id'], game['tourney_id']))
@@ -67,12 +86,15 @@ while True:
     
     
     # Some more tell commands:
-     
     def standings(usr, args, tags):
         s = args.split()
-        if len(s) < 1:
-            return bot.qtell.split(usr, 'You must give a tournament.')
-        
+        if len(args) < 1:
+            return league_standings(usr, args, tags)
+        else:
+            return tourney_standings(usr, args, tags)
+
+    def tourney_standings(usr, args, tags):
+        s = args.split()
         dcursor.execute('SELECT rowid, * FROM tourneys WHERE name=?', (s[0],))
         tourney = dcursor.fetchall()
         if len(tourney) == 0:
@@ -88,10 +110,81 @@ while True:
         
         l = ['+-------------------+-------+', '| handle            | score |', '+-------------------+-------+']
         for s in standings:
-               l.append('| %-17s | %5s |' % (s['handle'], str(s['score'])))
+               l.append(unicode_to_ascii('| %-17s | %5s |' % (s['handle'], str(s['score']))))
         l.append('+-------------------+-------+')
         return bot.qtell.send_list(usr, l)
-    
+
+    # helper function
+    def groupby_score(data, key=itemgetter(0), value=itemgetter(1)):
+        """Summarise the supplied data.
+
+        Produce a groupby_score of the data, grouped by the given key (default: the
+        first item), and giving totals of the given value (default: the second
+        item).
+        
+        The key and value arguments should be functions which, given a data
+        record, return the relevant value.
+        """
+
+        for k, group in groupby(data, key):
+            result = []
+            for row in group:
+                result.append(value(row))
+            yield (k, result)
+
+    # helper function
+    def unicode_to_ascii(ustring):
+        from unicodedata import normalize
+        return normalize('NFKD', ustring).encode('ASCII', 'ignore')
+
+    def league_standings(usr, args, tags):
+        dcursor.execute('SELECT DISTINCT tourney_id FROM players ORDER BY tourney_id ASC')
+        tourneys = dcursor.fetchall()
+
+        if len(tourneys) == 0:
+            return bot.qtell.split(usr, 'No tourneys found in players table.')
+
+        league_standings = {}
+        for tourney in tourneys:
+            dcursor.execute('SELECT users.handle as handle, score FROM players LEFT JOIN users ON users.rowid=player_id WHERE tourney_id=? ORDER BY score DESC, handle ASC', (tourney['tourney_id'],))
+            tourney_standings = dcursor.fetchall()
+        
+            if len(tourney_standings) < 1:
+                continue
+
+            aux_standings = []
+            for standing in tourney_standings:
+                aux_standings.append((int(standing['score'] * 10.0), standing['handle']))
+            scorers = rank = 0
+            for score, handles in groupby_score(aux_standings, key=itemgetter(0), value=itemgetter(1)):
+                if score > 0:
+                    for handle in handles:
+                        league_standings[handle] = league_standings.get(handle, 0) + league_scores[rank]
+                        scorers += 1
+                    if scorers < len(league_scores):
+                        rank += len(handles)
+                        continue
+                    else:
+                        break
+                else:
+                    break
+
+        # sort league_standings on score desc, handle asc
+        aux_standings = [ (league_standings[k], k) for k in league_standings.keys() ]
+        
+        if len(aux_standings) == 0:
+            return bot.qtell.split(usr, 'No player has scored ever.')
+
+        aux_standings.sort(reverse=True)
+        aux_standings = [ (score, handles) for score, handles in groupby_score(aux_standings, key=itemgetter(0), value=itemgetter(1)) ]
+
+        l = ['+-------------------+-------+', '| handle            | score |', '+-------------------+-------+']
+        for (score, handles) in aux_standings:
+            handles.sort()
+            for handle in handles:
+               l.append(unicode_to_ascii('| %-17s | %5s |' % (handle, str(score))))
+        l.append('+-------------------+-------+')
+        return bot.qtell.send_list(usr, l)
     
     def who(usr, args, tags):
         s = args.split()
@@ -113,7 +206,7 @@ while True:
         
         l = ['+-------------------+', '| handle            |', '+-------------------+']
         for s in standings:
-               l.append('| %-17s |' % (s['handle'],))
+               l.append(unicode_to_ascii('| %-17s |' % (s['handle'],)))
         l.append('+-------------------+')
         return bot.qtell.send_list(usr, l)
     
@@ -175,8 +268,9 @@ while True:
         if not tourneys:
             return bot.qtell.split(usr, 'There are currently no tourneys (shown).')
         for tourney in tourneys:
-            to_send.append('| %7s | %7s | %6s | %5s |' % (tourney['name'], tourney['controls'], tourney['status'], tourney['round']))
-    
+            to_send.append(unicode_to_ascii(
+                    '| %7s | %7s | %6s | %5s |' % 
+                    (tourney['name'], tourney['controls'], tourney['status'], tourney['round'])))
         to_send.append('+---------+---------+--------+-------+')
         return bot.qtell.send_list(usr, to_send)
     

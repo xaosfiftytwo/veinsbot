@@ -132,15 +132,15 @@ class Games(object):
         try: game_id = int(game_id)
         except: return self.icsbot.qtell.split(user, 'USAGE: grab game_id <FICS game identifier for smoves command>, game_id must be an Integer.')
         
-        if not self.games[gameid]:
+        if not self.games[game_id]:
             return self.icsbot.qtell.split(user, 'Invalid game identification number, please check the database.')
         
-        game = self.games[gameid]
+        game = self.games[game_id]
         
         # reload, in case of change in the database.
         game.load('rowid')
         if game not in self.games.to_end:
-            self.games.to_end.append('game')
+            self.games.to_end.add('game')
         
         moves = self.icsbot['moves']['smoves %s -1' % game['white']]
         moves['__games_should_be'] = game
