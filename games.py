@@ -141,7 +141,7 @@ class Games(object):
         game.load('rowid')
         if game not in self.games.to_end:
             self.games.to_end.add('game')
-        
+
         moves = self.icsbot['moves']['smoves %s -1' % game['white']]
         moves['__games_should_be'] = game
         moves['__games_try'] = None
@@ -159,7 +159,7 @@ class Games(object):
         """
         # Lets recreate the list of games that should be ending:
         self.games.sql.cursor.execute('SELECT rowid FROM games WHERE result="*" or result="ADJ"')
-        to_end = games.sql.cursor.fetchall()
+        to_end = self.games.sql.cursor.fetchall()
         self.games.to_end = set()
         for spam in to_end:
             self.games.to_end.add(games[spam[0]])
@@ -171,9 +171,9 @@ class Games(object):
         # At this point, the only thing that still can be bogus is the list of
         # games to start. Lets just check if there is none there that should
         # be finished already:
-        for g_s in self.to_start.copy():
+        for g_s in self.games.to_start.copy():
             if g_s['result'] != '*' or g_s['result'] != '-' or g_s['result'] != 'ADJ':
-                self.to_start.remove(g_s)
+                self.games.to_start.remove(g_s)
         
         
     
@@ -321,8 +321,8 @@ class Games(object):
                 else:
                     self.icsbot.send('rmatch %s %s %s %s' % tuple(l))
                 opponent = self.icsbot['users'][l[1]]
-                self.icsbot.send(self.icsbot.qtell.split(opponent, 'You have recieved a match request for your game in the %s against %s, please accept or decline it.' % (g_p['tourney'], handle_n)))
-                self.icsbot.send(self.icsbot.qtell.split(user, 'A match request for your game in the %s against %s has been send. If this is the wrong game, please withdraw the match request and use: play tourney_name or play -o opponent' % (g_p['tourney'], handle_n)))     
+                self.icsbot.send(self.icsbot.qtell.split(opponent, 'You have recieved a match request for your game in tourney %s against %s, please accept or decline it.' % (g_p['tourney'], handle_n)))
+                self.icsbot.send(self.icsbot.qtell.split(user, 'A match request for your game in tourney %s against %s has been sent. If this is the wrong game, please withdraw the match request and use: play tourney_name or play -o opponent' % (g_p['tourney'], handle_n)))     
                 self.games.to_start.add(g_p)
                 return
         return self.icsbot.qtell.split(user, 'I have not found a game to start for you.')
@@ -367,7 +367,7 @@ class Games(object):
                                     # gets executed.
                 self.icsbot.send(['tell %s Good luck in your game, the start has been noted.' % game['white'], 'tell %s Good luck in your game, the start has been noted.' % game['black']])
                 if self.announce_channel is not None:
-                    self.icsbot.send('tell %s Game started: %s vs. %s in the %s round %s. "observe %s"' % (self.announce_channel, g_s['white'], g_s['black'], g_s['tourney'], g_s['round'], g_s['gamenumber']))
+                    self.icsbot.send('tell %s Game started: %s vs. %s in %s, round %s. "observe %s"' % (self.announce_channel, g_s['white'], g_s['black'], g_s['tourney'], g_s['round'], g_s['gamenumber']))
                 return
             
             # There is a chance, that we are waiting for it to start, but the players won't start at all:
@@ -391,7 +391,7 @@ class Games(object):
                 g_e['result'] = '*'
                 self.icsbot.send(['tell %s Good luck in your game, the start has been noted.' % game['white'], 'tell %s Good luck in your game, the start has been noted.' % game['black']])
                 if self.announce_channel is not None:
-                    self.icsbot.send('tell %s Game started: %s vs. %s in the %s round %s. "observe %s"' % (self.announce_channel, g_e['white'], g_e['black'], g_e['tourney'], g_e['round'], g_e['gamenumber']))
+                    self.icsbot.send('tell %s Game started: %s vs. %s in tourney %s round %s. "observe %s"' % (self.announce_channel, g_e['white'], g_e['black'], g_e['tourney'], g_e['round'], g_e['gamenumber']))
                 return
     
     
@@ -415,7 +415,7 @@ class Games(object):
                 # We put it here because we want it to also work on aborts, as well as not on just game sets.
                 self.icsbot.send(['tell %s The game end was noted.' % g_e['white'], 'tell %s The game end was noted.' % g_e['black']])
                 if self.announce_channel is not None:
-                    self.icsbot.send('tell %s Game: %s vs. %s in the %s round %s ended as %s' % (self.announce_channel, g_e['white'], g_e['black'], g_e['tourney'], g_e['round'], result))
+                    self.icsbot.send('tell %s Game: %s vs. %s in tourney %s round %s ended as %s' % (self.announce_channel, g_e['white'], g_e['black'], g_e['tourney'], g_e['round'], result))
                 
                 # No need to grab something then:
                 if g_e['result'] == '-' or g_e['result'] == 'ADJ':
@@ -430,15 +430,19 @@ class Games(object):
     
     
     def all_games_were_gotten(self, status, item, old, new):
+        print 'enter Games.all_games_were_gotten'
         if new == True:
             for g_e in self.games.to_end:
                 if not g_e['gamenumber'] and g_e['result'] == '*':
-                    print 'Warning: Appearently game %s ended while I was not there. Attempting to grab from the players history games. If it did not work, you will have to use the grab command on this game ID, or insert move/result manually. There will/should be a second warning if it failed though.' % g_e['rowid']
-                    moves = self.icsbot['moves']['smoves %s -1' % g_e['white']]
+                    print 'Warning: Apparently game %s ended while I was not there. Attempting to grab from the players history games. If it did not work, you will have to use the grab command on this game ID, or insert move/result manually. There will/should be a second warning if it failed though.' % g_e['rowid']
+                    aux_moves = self.icsbot['moves']
+                    moves = aux_moves['smoves %s -1' % g_e['white']]
                     moves['__games_should_be'] = g_e
                     moves['__games_try'] = ('w', -1)
                     moves.register('loaded', self.store_info)
                     moves.load('loaded')
+        print 'exit Games.all_games_were_gotten'
+        return
                     
     
     def store_info(self, moves, item, old, new):

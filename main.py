@@ -1,7 +1,8 @@
 """A small tourney manager on the base of the icsbot package.
 """
 
-__author__ = 'Sebastian Berg'
+__original_author__ = 'Sebastian Berg'
+__co_author__ = 'xaosfiftytwo'
 __copyright__ = 'Sebastian Berg 2008'
 __license__ = 'LGPL v3'
 
@@ -22,12 +23,13 @@ from operator import itemgetter
 
 sys.stderr = file('output.txt', 'a')
 
-database = 'monkey.db'
+database = 'tourneys.sqlite'
 
 # Main loop in case of disconnections, just recreating the bot right now.
 # Should not actually be necessary.
 while True:
-    bot = icsbot.IcsBot(qtell_dummy=True) # Add qtell_dummy=True for running without TD.
+    # bot = icsbot.IcsBot(qtell_dummy=True) # Add qtell_dummy=True for running without TD.
+    bot = icsbot.IcsBot() # Add qtell_dummy=True for running without TD.
 
     users = bot['users']
     # Enable Status getting on user (keeps online users)
@@ -42,7 +44,7 @@ while True:
     
     # These are the stored games that I need pairings for, not the ones
     # on the server:
-    games_module.Games(bot, database, announce_channel='144', no_td=True)
+    games_module.Games(bot, database, announce_channel='177', no_td=False)
     games = bot['games']
     
     dcursor = games.sql.dcursor # just a hack to get a cursor to the database.
@@ -50,6 +52,9 @@ while True:
     # get game scores from the database
     dcursor.execute('SELECT win, draw, loss FROM game_scores ORDER BY rowid DESC')
     aux_scores = dcursor.fetchall()
+    if len(aux_scores) == 0:
+        raise AssertionError, 'No game scores found in db.'
+    assert len(aux_scores) == 1, 'Duplicate game scores found in db.'
 
     scores = {'1-0': (aux_scores[0]['win'],aux_scores[0]['loss']), 
               '0-1': (aux_scores[0]['loss'],aux_scores[0]['win']), 
@@ -382,7 +387,7 @@ while True:
     bot.reg_tell('list', list_tourneys)
     
     try:
-        bot.connect('vbot', '')
+        bot.connect('handle', 'password')
     except icsbot.InvalidLogin, msg:
         print msg
         if str(msg) == 'Handle in use.':
